@@ -1,0 +1,23 @@
+# Use the same base you had (Debian Buster + Python 3.9)
+FROM python:3.9-buster
+
+# 1) Install OS‐level build tools & Postgres headers (needed by pandas/psycopg2)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      build-essential \
+      libpq-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+# 2) Install all Python dependencies only once at build time
+RUN pip install minio pandas pyarrow fastparquet psycopg2-binary sqlalchemy
+
+# 3) Copy your pipeline script into /app
+WORKDIR /app
+COPY scripts/datalake_pipeline.py /app/datalake_pipeline.py
+
+# 4) Make the script executable
+RUN chmod +x /app/datalake_pipeline.py
+
+# 5) Default command: run the pipeline
+CMD ["python", "/app/datalake_pipeline.py"]
+
