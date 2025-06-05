@@ -1,0 +1,107 @@
+
+version: "3.8"
+
+services:
+
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    ports:
+      - "9000:9000"    # S3 API
+      - "9090:9090"    # Web console
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: admin123
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9090"
+    networks:
+      - datalake_net
+
+  spark:
+    image: jupyter/pyspark-notebook
+    container_name: spark
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./notebooks:/home/jovyan/work
+      - ./jars:/home/jovyan/jars
+    environment:
+      JUPYTER_ENABLE_LAB: "yes"
+      SPARK_SUBMIT_OPTIONS: "--jars /home/jovyan/jars/hadoop-aws-3.1.2.jar,/home/jovyan/jars/aws-java-sdk-1.11.534.jar,/home/jovyan/jars/aws-java-sdk-core-1.11.534.jar,/home/jovyan/jars/aws-java-sdk-dynamodb-1.11.534.jar,/home/jovyan/jars/aws-java-sdk-kms-1.11.534.jar,/home/jovyan/jars/aws-java-sdk-s3-1.11.534.jar,/home/jovyan/jars/httpclient-4.5.3.jar,/home/jovyan/jars/joda-time-2.9.9.jar"
+    networks:
+      - datalake_net
+
+  superset-db:
+    image: postgres:13
+    container_name: superset_db
+    environment:
+      POSTGRES_DB: superset
+      POSTGRES_USER: superset
+      POSTGRES_PASSWORD: superset
+    volumes:
+      - superset_db_data:/var/lib/postgresql/data
+    networks:
+      - datalake_net
+
+  superset:
+    image: apache/superset:latest
+    container_name: superset
+    depends_on:
+      - superset-db
+    ports:
+      - "8088:8088"
+    environment:
+      SUPERSET_SECRET_KEY: superset_secret
+      ADMIN_USERNAME: admin
+      ADMIN_FIRST_NAME: Admin
+      ADMIN_LAST_NAME: Superset
+      ADMIN_EMAIL: admin@superset.com
+      ADMIN_PASSWORD: admin123
+      # Point Superset at the same Postgres instance:
+      SUPERSET_DATABASE_URI: postgresql+psycopg2://superset:superset@superset-db:5432/superset
+    volumes:
+      - ./superset/init.sh:/app/docker-init.sh
+    command: ["/bin/sh", "-c", "pip install psycopg2-binary && /app/docker-init.sh && superset run -h 0.0.0.0 -p 8088"]
+    networks:
+      - datalake_net
+
+  datalake-demo:
+    # Build from our custom Dockerfile.datalake
+    build:
+      context: .
+      dockerfile: Dockerfile.datalake
+    image: demo-datalake:latest   # arbitrary name/tag for your custom image
+    container_name: datalake-demo
+    depends_on:
+      - minio
+      - superset-db
+    environment:
+      MINIO_ENDPOINT: "minio:9000"
+      MINIO_ACCESS_KEY: "admin"
+      MINIO_SECRET_KEY: "admin123"
+      MINIO_SECURE: "false"
+      RAW_BUCKET: "datalake"
+      RAW_PREFIX: "raw/"
+      SILVER_PREFIX: "silver/"
+      GOLD_PREFIX: "gold/"
+      RAW_FILENAME: "stress_sleep.csv"
+      PG_HOST: "superset-db"
+      PG_PORT: "5432"
+      PG_DB: "superset"
+      PG_USER: "superset"
+      PG_PASS: "superset"
+      PG_TABLE: "stress_sleep_silver"
+    networks:
+      - datalake_net
+
+
+
+volumes:
+  minio_data:
+  superset_db_data:
+
+networks:
+  datalake_net:
+    driver: bridge
+
